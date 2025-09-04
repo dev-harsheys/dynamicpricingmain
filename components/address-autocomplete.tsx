@@ -1089,7 +1089,9 @@ export function AddressAutocomplete({
           placeholder={placeholder}
           value={value}
           onChange={(e) => handleInputChange(e.target.value)}
-          className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 focus:border-orange-400 focus:ring-orange-400/20"
+          className={`border-gray-600 placeholder-gray-400 focus:border-orange-400 focus:ring-orange-400/20 ${
+            value ? "bg-white text-black" : "bg-gray-800/50 text-white"
+          }`}
         />
 
         {isLoading && (
@@ -1100,7 +1102,7 @@ export function AddressAutocomplete({
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-auto">
+        <div className="absolute z-[9999] w-full mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-auto">
           {suggestions.map((suggestion) => (
             <div
               key={suggestion.place_id}

@@ -1329,40 +1329,42 @@ export default function PricingCalculator() {
               </CardContent>
             </Card>
 
-            <Card className="bg-gray-900/80 border-gray-700 backdrop-blur-sm hover:bg-gray-800/90 hover:border-green-500/50 hover:scale-105 hover:shadow-2xl hover:shadow-green-500/20 transition-all duration-300 transform">
-              <CardHeader className="hover:bg-gray-800/50 transition-colors duration-300">
-                <CardTitle className="flex items-center gap-2 text-white hover:text-green-400 transition-colors duration-300">
-                  <BarChart3 className="h-5 w-5 text-green-400 hover:scale-110 transition-transform duration-300" />
-                  Price Composition
-                </CardTitle>
-                <CardDescription className="text-gray-400 hover:text-gray-300 transition-colors duration-300">
-                  Visual breakdown of pricing components
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {pieChartData.map((item, index) => (
-                    <div
-                      key={index}
-                      className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 hover:scale-105 transition-all duration-300"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-4 h-4 rounded-full hover:scale-125 transition-transform duration-300"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <span className="text-gray-300 hover:text-white transition-colors duration-300">
-                          {item.name}
+            {hasLocations && (
+              <Card className="bg-gray-900/80 border-gray-700 backdrop-blur-sm hover:bg-gray-800/90 hover:border-green-500/50 hover:scale-105 hover:shadow-2xl hover:shadow-green-500/20 transition-all duration-300 transform">
+                <CardHeader className="hover:bg-gray-800/50 transition-colors duration-300">
+                  <CardTitle className="flex items-center gap-2 text-white hover:text-green-400 transition-colors duration-300">
+                    <BarChart3 className="h-5 w-5 text-green-400 hover:scale-110 transition-transform duration-300" />
+                    Price Composition
+                  </CardTitle>
+                  <CardDescription className="text-gray-400 hover:text-gray-300 transition-colors duration-300">
+                    Visual breakdown of pricing components
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {pieChartData.map((item, index) => (
+                      <div
+                        key={index}
+                        className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 hover:scale-105 transition-all duration-300"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-4 h-4 rounded-full hover:scale-125 transition-transform duration-300"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-gray-300 hover:text-white transition-colors duration-300">
+                            {item.name}
+                          </span>
+                        </div>
+                        <span className="text-white font-medium hover:scale-110 transition-transform duration-300">
+                          ₹{item.value.toFixed(2)}
                         </span>
                       </div>
-                      <span className="text-white font-medium hover:scale-110 transition-transform duration-300">
-                        ₹{item.value.toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="bg-gray-900/80 border-gray-700 backdrop-blur-sm hover:bg-gray-800/90 hover:border-blue-500/50 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/20 transition-all duration-300 transform">
               <CardHeader className="hover:bg-gray-800/50 transition-colors duration-300">
