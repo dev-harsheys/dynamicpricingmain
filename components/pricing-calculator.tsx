@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
 import { Input } from "@/components/ui/input"
@@ -24,9 +24,10 @@ import {
   Navigation,
   Clock,
   Route,
+  Building,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { fetchFuelPrices, fetchTrafficData, fetchWeatherData } from "@/lib/api-services"
+import { fetchFuelPrices, fetchTrafficData as fetchHistoricalTrafficData, fetchWeatherData } from "@/lib/api-services"
 import { AnimatedBackground } from "@/components/animated-background"
 import { ThermometerIcon } from "@/components/thermometer"
 import { AddressAutocomplete } from "./address-autocomplete"
@@ -390,6 +391,27 @@ const getTemperatureLabel = (temp: number) => {
   return "Comfortable"
 }
 
+const fetchTrafficData = async (from: string, to: string) => {
+  try {
+    const response = await fetch(`/api/traffic?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+    const data = await response.json()
+
+    if (response.ok) {
+      console.log(`[v0] Traffic data for ${from} to ${to}:`, data)
+      return {
+        trafficLevel: data.trafficLevel,
+        estimatedDelay: data.estimatedDelay || 0,
+      }
+    } else {
+      console.error("[v0] Traffic API error:", data.error)
+      return null
+    }
+  } catch (error) {
+    console.error("[v0] Failed to fetch traffic data:", error)
+    return null
+  }
+}
+
 export default function PricingCalculator() {
   const [factors, setFactors] = useState<PricingFactors>({
     basePrice: 2000.0,
@@ -453,122 +475,79 @@ export default function PricingCalculator() {
     return () => window.removeEventListener("error", handleResizeObserverError)
   }, [])
 
-  const fetchRealTimeData = useCallback(async () => {
-    setIsLoadingFuel(true)
-    setIsLoadingTraffic(true)
-    setIsLoadingWeather(true)
-
-    try {
-      const fuelData = await fetchFuelPrices(factors.state)
-      if (fuelData) {
-        setFactors((prev) => ({ ...prev, fuelPrice: fuelData.petrol }))
-      }
-
-      const trafficData = await fetchTrafficData(factors.city)
-      if (trafficData.length > 0) {
-        setHistoricalData((prevData) => {
-          return trafficData.map((data, index) => {
-            const currentData = prevData[index] || {
-              time: data.time,
-              price: 2000,
-              traffic: 50,
-              fuel: 100,
-            }
-            return {
-              ...currentData,
-              time: data.time,
-              traffic: Math.round(data.trafficLevel),
-              fuel: fuelData ? fuelData.petrol : currentData.fuel,
-            }
-          })
-        })
-      }
-
-      const weatherData = await fetchWeatherData(factors.city)
-      if (weatherData) {
-        setFactors((prev) => ({
-          ...prev,
-          weatherCondition: weatherData.condition,
-          temperature: weatherData.temperature,
-        }))
-      }
-
-      setLastUpdated(new Date().toLocaleTimeString())
-    } catch (error) {
-      console.error("Error fetching real-time data:", error)
-    } finally {
-      setIsLoadingFuel(false)
-      setIsLoadingTraffic(false)
-      setIsLoadingWeather(false)
+  const calculateDeliveryPrice = async () => {
+    if (!deliveryLocation.fromLocation || !deliveryLocation.toLocation) {
+      setDeliveryLocation((prev) => ({
+        ...prev,
+        distance: 0,
+        estimatedTime: 0,
+        trafficMultiplier: 1,
+        deliveryPrice: 0,
+      }))
+      return
     }
-  }, [factors.state, factors.city])
-
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout
-    let intervalId: NodeJS.Timeout
-
-    const debouncedFetch = () => {
-      clearTimeout(timeoutId)
-      timeoutId = setTimeout(() => {
-        fetchRealTimeData()
-
-        // Clear existing interval before setting new one
-        clearInterval(intervalId)
-        intervalId = setInterval(fetchRealTimeData, 5 * 60 * 1000)
-      }, 500)
-    }
-
-    debouncedFetch()
-
-    return () => {
-      clearTimeout(timeoutId)
-      clearInterval(intervalId)
-    }
-  }, [fetchRealTimeData])
-
-  const calculateDeliveryPrice = useCallback(async () => {
-    if (!deliveryLocation.fromLocation || !deliveryLocation.toLocation) return
 
     setIsCalculatingRoute(true)
 
     try {
+      // Fetch real traffic data
+      const trafficData = await fetchTrafficData(deliveryLocation.fromLocation, deliveryLocation.toLocation)
+
+      // Update traffic level in factors if we got real data
+      if (trafficData) {
+        setFactors((prev) => ({ ...prev, trafficLevel: trafficData.trafficLevel }))
+
+        setHistoricalData((prevData) => {
+          return prevData.map((data) => {
+            if (data.time === currentTimeSlot) {
+              return {
+                ...data,
+                traffic: trafficData.trafficLevel,
+                price: Math.round(2000 + (trafficData.trafficLevel / 100) * 500), // Adjust price based on traffic
+              }
+            }
+            return data
+          })
+        })
+      }
+
       // Enhanced location-based distance calculation
-      const fromLocation = deliveryLocation.fromLocation.toLowerCase()
-      const toLocation = deliveryLocation.toLocation.toLowerCase()
+      const fromLocationLower = deliveryLocation.fromLocation.toLowerCase()
+      const toLocationLower = deliveryLocation.toLocation.toLowerCase()
 
       let simulatedDistance = Math.random() * 50 + 5 // Default 5-55 km
 
       // Inter-city distances (approximate realistic distances)
-      if (fromLocation.includes("mumbai") && toLocation.includes("pune")) {
+      if (fromLocationLower.includes("mumbai") && toLocationLower.includes("pune")) {
         simulatedDistance = 150 + Math.random() * 20
-      } else if (fromLocation.includes("delhi") && toLocation.includes("gurgaon")) {
+      } else if (fromLocationLower.includes("delhi") && toLocationLower.includes("gurgaon")) {
         simulatedDistance = 30 + Math.random() * 10
-      } else if (fromLocation.includes("bangalore") && toLocation.includes("mysore")) {
+      } else if (fromLocationLower.includes("bangalore") && toLocationLower.includes("mysore")) {
         simulatedDistance = 140 + Math.random() * 20
-      } else if (fromLocation.includes("chennai") && toLocation.includes("bangalore")) {
+      } else if (fromLocationLower.includes("chennai") && toLocationLower.includes("bangalore")) {
         simulatedDistance = 350 + Math.random() * 30
-      } else if (fromLocation.includes("hyderabad") && toLocation.includes("bangalore")) {
+      } else if (fromLocationLower.includes("hyderabad") && toLocationLower.includes("bangalore")) {
         simulatedDistance = 570 + Math.random() * 40
-      } else if (fromLocation.includes("kolkata") && toLocation.includes("delhi")) {
+      } else if (fromLocationLower.includes("kolkata") && toLocationLower.includes("delhi")) {
         simulatedDistance = 1450 + Math.random() * 100
-      } else if (fromLocation.includes("mumbai") && toLocation.includes("delhi")) {
+      } else if (fromLocationLower.includes("mumbai") && toLocationLower.includes("delhi")) {
         simulatedDistance = 1400 + Math.random() * 100
-      } else if (fromLocation.includes("jaipur") && toLocation.includes("delhi")) {
+      } else if (fromLocationLower.includes("jaipur") && toLocationLower.includes("delhi")) {
         simulatedDistance = 280 + Math.random() * 30
-      } else if (fromLocation.includes("ahmedabad") && toLocation.includes("mumbai")) {
+      } else if (fromLocationLower.includes("ahmedabad") && toLocationLower.includes("mumbai")) {
         simulatedDistance = 520 + Math.random() * 40
-      } else if (fromLocation.includes("kochi") && toLocation.includes("bangalore")) {
+      } else if (fromLocationLower.includes("kochi") && toLocationLower.includes("bangalore")) {
         simulatedDistance = 460 + Math.random() * 40
       }
 
       // Same city but different areas
       const sameCity =
-        (fromLocation.includes("mumbai") && toLocation.includes("mumbai")) ||
-        (fromLocation.includes("delhi") && toLocation.includes("delhi")) ||
-        (fromLocation.includes("bangalore") && toLocation.includes("bangalore")) ||
-        (fromLocation.includes("chennai") && toLocation.includes("chennai")) ||
-        (fromLocation.includes("hyderabad") && toLocation.includes("hyderabad")) ||
-        (fromLocation.includes("kolkata") && toLocation.includes("kolkata"))
+        (fromLocationLower.includes("mumbai") && toLocationLower.includes("mumbai")) ||
+        (fromLocationLower.includes("delhi") && toLocationLower.includes("delhi")) ||
+        (fromLocationLower.includes("bangalore") && toLocationLower.includes("bangalore")) ||
+        (fromLocationLower.includes("chennai") && toLocationLower.includes("chennai")) ||
+        (fromLocationLower.includes("hyderabad") && toLocationLower.includes("hyderabad")) ||
+        (fromLocationLower.includes("kolkata") && toLocationLower.includes("kolkata"))
 
       if (sameCity) {
         simulatedDistance = Math.random() * 40 + 5 // 5-45 km within city
@@ -587,7 +566,7 @@ export default function PricingCalculator() {
       const totalDeliveryPrice = distancePrice + trafficSurcharge + weatherSurcharge + Math.max(0, fuelSurcharge)
 
       console.log(
-        `[v0] Calculated delivery from ${fromLocation} to ${toLocation}: ${simulatedDistance.toFixed(1)}km, ₹${totalDeliveryPrice.toFixed(2)}`,
+        `[v0] Calculated delivery from ${fromLocationLower} to ${toLocationLower}: ${simulatedDistance.toFixed(1)}km, ₹${totalDeliveryPrice.toFixed(2)}`,
       )
 
       setDeliveryLocation((prev) => ({
@@ -602,7 +581,23 @@ export default function PricingCalculator() {
     } finally {
       setIsCalculatingRoute(false)
     }
-  }, [deliveryLocation.fromLocation, deliveryLocation.toLocation, factors])
+  }
+
+  const extractLocationInfo = (location: string) => {
+    const locationLower = location.toLowerCase()
+
+    // Find matching state and city
+    for (const [stateKey, cities] of Object.entries(stateToCity)) {
+      for (const city of cities) {
+        if (locationLower.includes(city.value) || locationLower.includes(city.label.toLowerCase())) {
+          return { state: stateKey, city: city.value }
+        }
+      }
+    }
+
+    // Default fallback
+    return { state: "maharashtra", city: "mumbai" }
+  }
 
   const getWeatherMultiplier = (weather: string) => {
     switch (weather) {
@@ -704,6 +699,99 @@ export default function PricingCalculator() {
     }
   }, [factors.state])
 
+  const hasLocations = deliveryLocation.fromLocation && deliveryLocation.toLocation
+
+  useEffect(() => {
+    if (deliveryLocation.fromLocation) {
+      const locationInfo = extractLocationInfo(deliveryLocation.fromLocation)
+      setFactors((prev) => ({
+        ...prev,
+        state: locationInfo.state,
+        city: locationInfo.city,
+      }))
+    }
+  }, [deliveryLocation.fromLocation])
+
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout
+    let intervalId: NodeJS.Timeout
+
+    const debouncedFetch = () => {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => {
+        fetchRealTimeData()
+
+        // Clear existing interval before setting new one
+        clearInterval(intervalId)
+        intervalId = setInterval(fetchRealTimeData, 5 * 60 * 1000)
+      }, 500)
+    }
+
+    const fetchRealTimeData = async () => {
+      setIsLoadingTraffic(true)
+      setIsLoadingWeather(true)
+
+      try {
+        const fuelData = await fetchFuelPrices(factors.state)
+        if (fuelData) {
+          setFactors((prev) => ({ ...prev, fuelPrice: fuelData.petrol }))
+        }
+
+        const trafficData = await fetchHistoricalTrafficData(factors.city)
+        if (trafficData.length > 0) {
+          setHistoricalData((prevData) => {
+            return trafficData.map((data, index) => {
+              const currentData = prevData[index] || {
+                time: data.time,
+                price: 2000,
+                traffic: 50,
+                fuel: 100,
+              }
+
+              const isCurrentTime = data.time === currentTimeSlot
+              const trafficLevel =
+                isCurrentTime && factors.trafficLevel !== 50 ? factors.trafficLevel : Math.round(data.trafficLevel)
+
+              return {
+                ...currentData,
+                time: data.time,
+                traffic: trafficLevel,
+                price: isCurrentTime ? Math.round(2000 + (trafficLevel / 100) * 500) : currentData.price,
+                fuel: fuelData ? fuelData.petrol : currentData.fuel,
+              }
+            })
+          })
+        }
+
+        const weatherData = await fetchWeatherData(factors.city)
+        if (weatherData) {
+          setFactors((prev) => ({
+            ...prev,
+            weatherCondition: weatherData.condition,
+            temperature: weatherData.temperature,
+          }))
+        }
+
+        setLastUpdated(new Date().toLocaleTimeString())
+      } catch (error) {
+        console.error("Error fetching real-time data:", error)
+      } finally {
+        setIsLoadingTraffic(false)
+        setIsLoadingWeather(false)
+      }
+    }
+
+    debouncedFetch()
+
+    return () => {
+      clearTimeout(timeoutId)
+      clearInterval(intervalId)
+    }
+  }, [factors.state, factors.city, factors.trafficLevel, currentTimeSlot])
+
+  const fromLocation = deliveryLocation.fromLocation
+  const toLocation = deliveryLocation.toLocation
+
   return (
     <div className="min-h-screen bg-gray-950 text-white relative overflow-hidden">
       <AnimatedBackground />
@@ -744,7 +832,9 @@ export default function PricingCalculator() {
                 label="From Location"
                 placeholder="Enter pickup location (e.g., Mumbai Central)"
                 value={deliveryLocation.fromLocation}
-                onChange={(value) => setDeliveryLocation((prev) => ({ ...prev, fromLocation: value }))}
+                onChange={(value) => {
+                  setDeliveryLocation((prev) => ({ ...prev, fromLocation: value }))
+                }}
                 icon="from"
               />
 
@@ -760,7 +850,7 @@ export default function PricingCalculator() {
 
             <div className="flex justify-center">
               <Button
-                onClick={calculateDeliveryPrice}
+                onClick={() => calculateDeliveryPrice()}
                 disabled={!deliveryLocation.fromLocation || !deliveryLocation.toLocation || isCalculatingRoute}
                 className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold px-8 py-2 rounded-lg hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -924,33 +1014,38 @@ export default function PricingCalculator() {
                   />
                 </div>
 
-                <div className="space-y-3 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
-                  <div className="flex items-center justify-between">
-                    <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
-                      <Car className="h-4 w-4 text-blue-400 hover:scale-110 transition-transform duration-300" />
-                      Traffic Level
-                    </Label>
-                    <Badge
-                      className={`${getTrafficColor(factors.trafficLevel)} hover:scale-110 transition-all duration-300`}
-                    >
-                      {getTrafficLabel(factors.trafficLevel)}
-                    </Badge>
+                {hasLocations && (
+                  <div className="space-y-3 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
+                    <div className="flex items-center justify-between">
+                      <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
+                        <Car className="h-4 w-4 text-blue-400 hover:scale-110 transition-transform duration-300" />
+                        Traffic Level <span className="text-xs text-gray-400">(Auto-updated)</span>
+                      </Label>
+                      <Badge
+                        className={`${getTrafficColor(factors.trafficLevel)} hover:scale-110 transition-all duration-300`}
+                      >
+                        {getTrafficLabel(factors.trafficLevel)}
+                      </Badge>
+                    </div>
+                    <Slider
+                      value={[factors.trafficLevel]}
+                      onValueChange={(value) => setFactors((prev) => ({ ...prev, trafficLevel: value[0] }))}
+                      max={100}
+                      step={1}
+                      className="w-full [&_[role=slider]]:bg-blue-400 [&_[role=slider]]:border-blue-400 [&_[role=slider]]:hover:scale-125 [&_[role=slider]]:hover:shadow-lg [&_[role=slider]]:hover:shadow-blue-400/50 [&_[role=slider]]:transition-all [&_[role=slider]]:duration-300"
+                    />
+                    <div className="flex justify-between text-sm text-gray-400">
+                      <span className="hover:text-white transition-colors duration-300">Light</span>
+                      <span className="text-blue-400 font-medium hover:scale-110 transition-transform duration-300">
+                        {factors.trafficLevel}%
+                      </span>
+                      <span className="hover:text-white transition-colors duration-300">Severe</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-2">
+                      Traffic level automatically updates based on your selected route
+                    </div>
                   </div>
-                  <Slider
-                    value={[factors.trafficLevel]}
-                    onValueChange={(value) => setFactors((prev) => ({ ...prev, trafficLevel: value[0] }))}
-                    max={100}
-                    step={1}
-                    className="w-full [&_[role=slider]]:bg-blue-400 [&_[role=slider]]:border-blue-400 [&_[role=slider]]:hover:scale-125 [&_[role=slider]]:hover:shadow-lg [&_[role=slider]]:hover:shadow-blue-400/50 [&_[role=slider]]:transition-all [&_[role=slider]]:duration-300"
-                  />
-                  <div className="flex justify-between text-sm text-gray-400">
-                    <span className="hover:text-white transition-colors duration-300">Light</span>
-                    <span className="text-blue-400 font-medium hover:scale-110 transition-transform duration-300">
-                      {factors.trafficLevel}%
-                    </span>
-                    <span className="hover:text-white transition-colors duration-300">Severe</span>
-                  </div>
-                </div>
+                )}
 
                 <div className="space-y-3 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
                   <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
@@ -1007,59 +1102,66 @@ export default function PricingCalculator() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
-                    <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
-                      <MapPin className="h-4 w-4 text-blue-400 hover:scale-110 transition-transform duration-300" />
-                      State
-                    </Label>
-                    <Select
-                      value={factors.state}
-                      onValueChange={(value) => setFactors((prev) => ({ ...prev, state: value }))}
-                    >
-                      <SelectTrigger className="bg-gray-800 border-gray-600 text-white hover:bg-gray-700 hover:border-blue-400/50 hover:scale-105 transition-all duration-300">
-                        <SelectValue placeholder="Select a state" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-gray-800 border-gray-600">
-                        {stateOptions.map((state) => (
-                          <SelectItem
-                            key={state.value}
-                            value={state.value}
-                            className="text-white hover:bg-gray-700 hover:text-blue-400 transition-colors duration-300"
-                          >
-                            {state.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
+                  <div className="space-y-3 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
                     <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
                       <MapPin className="h-4 w-4 text-green-400 hover:scale-110 transition-transform duration-300" />
-                      City
-                      {isLoadingTraffic && (
-                        <div className="animate-spin h-3 w-3 border border-green-400 border-t-transparent rounded-full"></div>
-                      )}
+                      State
                     </Label>
-                    <Select
-                      value={factors.city}
-                      onValueChange={(value) => setFactors((prev) => ({ ...prev, city: value }))}
-                    >
-                      <SelectTrigger className="bg-gray-800 border-gray-600 text-white hover:bg-gray-700 hover:border-green-400/50 hover:scale-105 transition-all duration-300">
-                        <SelectValue placeholder="Select a city" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-gray-800 border-gray-600">
-                        {availableCities.map((city) => (
-                          <SelectItem
-                            key={city.value}
-                            value={city.value}
-                            className="text-white hover:bg-gray-700 hover:text-green-400 transition-colors duration-300"
-                          >
-                            {city.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {hasLocations ? (
+                      <>
+                        <Badge className="bg-green-500/20 text-green-400 hover:scale-110 transition-all duration-300 mb-2">
+                          {factors.state.charAt(0).toUpperCase() + factors.state.slice(1).replace("-", " ")}
+                        </Badge>
+                        <Select
+                          value={factors.state}
+                          onValueChange={(value) => setFactors((prev) => ({ ...prev, state: value }))}
+                        >
+                          <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white hover:bg-gray-700/50 hover:border-blue-500/50 transition-all duration-300">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-gray-800 border-gray-700">
+                            {Object.keys(stateToCity).map((state) => (
+                              <SelectItem key={state} value={state} className="text-white hover:bg-gray-700">
+                                {state.charAt(0).toUpperCase() + state.slice(1).replace("-", " ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </>
+                    ) : (
+                      <Badge className="bg-gray-500/20 text-gray-400 w-fit">Enter locations first</Badge>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 hover:bg-gray-800/30 p-3 rounded-lg transition-all duration-300">
+                    <Label className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors duration-300">
+                      <Building className="h-4 w-4 text-purple-400 hover:scale-110 transition-transform duration-300" />
+                      City
+                    </Label>
+                    {hasLocations ? (
+                      <>
+                        <Badge className="bg-purple-500/20 text-purple-400 hover:scale-110 transition-all duration-300 mb-2">
+                          {availableCities.find((c) => c.value === factors.city)?.label || factors.city}
+                        </Badge>
+                        <Select
+                          value={factors.city}
+                          onValueChange={(value) => setFactors((prev) => ({ ...prev, city: value }))}
+                        >
+                          <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white hover:bg-gray-700/50 hover:border-blue-500/50 transition-all duration-300">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-gray-800 border-gray-700">
+                            {availableCities.map((city) => (
+                              <SelectItem key={city.value} value={city.value} className="text-white hover:bg-gray-700">
+                                {city.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </>
+                    ) : (
+                      <Badge className="bg-gray-500/20 text-gray-400 w-fit">Enter locations first</Badge>
+                    )}
                   </div>
                 </div>
 
@@ -1157,57 +1259,73 @@ export default function PricingCalculator() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {historicalData.map((data, index) => (
-                    <div
-                      key={index}
-                      className={`flex justify-between items-center p-3 rounded-lg transition-all duration-300 ${
-                        data.time === currentTimeSlot
-                          ? "bg-purple-800/50 border-2 border-purple-400 hover:bg-purple-700/60 hover:scale-105 shadow-lg shadow-purple-500/20"
-                          : "bg-gray-800/50 hover:bg-gray-700/50 hover:scale-105"
-                      }`}
-                    >
-                      <span
-                        className={`transition-colors duration-300 ${
-                          data.time === currentTimeSlot ? "text-purple-300 font-bold" : "text-gray-300 hover:text-white"
+                {deliveryLocation.fromLocation && deliveryLocation.toLocation ? (
+                  <div className="space-y-3">
+                    {historicalData.map((data, index) => (
+                      <div
+                        key={index}
+                        className={`flex justify-between items-center p-3 rounded-lg transition-all duration-300 ${
+                          data.time === currentTimeSlot
+                            ? "bg-purple-800/50 border-2 border-purple-400 hover:bg-purple-700/60 hover:scale-105 shadow-lg shadow-purple-500/20"
+                            : "bg-gray-800/50 hover:bg-gray-700/50 hover:scale-105"
                         }`}
                       >
-                        {data.time}
-                        {data.time === currentTimeSlot && (
-                          <span className="ml-2 text-xs bg-purple-500 px-2 py-1 rounded-full animate-pulse">NOW</span>
-                        )}
-                      </span>
-                      <div className="flex gap-4 text-sm">
-                        <span className="text-blue-400 hover:text-blue-300 hover:scale-110 transition-all duration-300">
-                          ₹{data.price}
+                        <span
+                          className={`transition-colors duration-300 ${
+                            data.time === currentTimeSlot
+                              ? "text-purple-300 font-bold"
+                              : "text-gray-300 hover:text-white"
+                          }`}
+                        >
+                          {data.time}
+                          {data.time === currentTimeSlot && (
+                            <span className="ml-2 text-xs bg-purple-500 px-2 py-1 rounded-full animate-pulse">NOW</span>
+                          )}
                         </span>
-                        <span className="text-orange-400 hover:text-orange-300 hover:scale-110 transition-all duration-300">
-                          Traffic: {data.traffic}%
-                        </span>
-                        <span className="text-green-400 hover:text-green-300 hover:scale-110 transition-all duration-300">
-                          Fuel: ₹{data.fuel}
-                        </span>
+                        <div className="flex gap-4 text-sm">
+                          <span className="text-blue-400 hover:text-blue-300 hover:scale-110 transition-all duration-300">
+                            ₹{data.price}
+                          </span>
+                          <span className="text-orange-400 hover:text-orange-300 hover:scale-110 transition-all duration-300">
+                            Traffic: {data.traffic}%
+                          </span>
+                          <span className="text-green-400 hover:text-green-300 hover:scale-110 transition-all duration-300">
+                            Fuel: ₹{data.fuel}
+                          </span>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="w-16 h-16 bg-gray-800/50 rounded-full flex items-center justify-center mb-4">
+                      <BarChart3 className="h-8 w-8 text-gray-500" />
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 text-xs text-gray-500 text-center">
-                  {!isLoadingTraffic && (
-                    <div className="flex items-center justify-center gap-2">
-                      {process.env.GOOGLE_MAPS_API_KEY ? (
-                        <span className="text-green-400">● Live traffic data (Google Maps)</span>
-                      ) : (
-                        <span className="text-yellow-400">● Simulated traffic data</span>
-                      )}
-                      <span className="text-blue-400">Last updated: {lastUpdated}</span>
-                    </div>
-                  )}
-                  {isLoadingTraffic && (
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="text-yellow-400">⟳ Fetching traffic data...</span>
-                    </div>
-                  )}
-                </div>
+                    <p className="text-gray-400 text-lg font-medium mb-2">Enter Delivery Locations</p>
+                    <p className="text-gray-500 text-sm max-w-xs">
+                      Please enter both pickup and delivery locations to see real-time pricing trends and traffic data.
+                    </p>
+                  </div>
+                )}
+                {deliveryLocation.fromLocation && deliveryLocation.toLocation && (
+                  <div className="mt-4 text-xs text-gray-500 text-center">
+                    {!isLoadingTraffic && (
+                      <div className="flex items-center justify-center gap-2">
+                        {process.env.GOOGLE_MAPS_API_KEY ? (
+                          <span className="text-green-400">● Live traffic data (Google Maps)</span>
+                        ) : (
+                          <span className="text-yellow-400">● Simulated traffic data</span>
+                        )}
+                        <span className="text-blue-400">Last updated: {lastUpdated}</span>
+                      </div>
+                    )}
+                    {isLoadingTraffic && (
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-yellow-400">⟳ Fetching traffic data...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 

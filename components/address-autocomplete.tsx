@@ -1,5 +1,9 @@
 "use client"
 
+import { useState } from "react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+
 interface AddressSuggestion {
   place_id: string
   description: string
@@ -1030,4 +1034,85 @@ export function AddressAutocomplete({
   onChange,
   icon,
   className = "",
-}: AddressAutocompleteProps) {}
+}: AddressAutocompleteProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleInputChange = (inputValue: string) => {
+    onChange(inputValue)
+
+    if (inputValue.length > 0) {
+      setIsLoading(true)
+
+      // Filter locations based on input
+      const filtered = indiaLocations
+        .filter(
+          (location) =>
+            location.main.toLowerCase().includes(inputValue.toLowerCase()) ||
+            location.secondary.toLowerCase().includes(inputValue.toLowerCase()),
+        )
+        .slice(0, 8)
+        .map((location, index) => ({
+          place_id: `${location.main}_${index}`,
+          description: `${location.main}, ${location.secondary}`,
+          structured_formatting: {
+            main_text: location.main,
+            secondary_text: location.secondary,
+          },
+        }))
+
+      setSuggestions(filtered)
+      setIsOpen(filtered.length > 0)
+      setIsLoading(false)
+    } else {
+      setSuggestions([])
+      setIsOpen(false)
+    }
+  }
+
+  const handleSuggestionClick = (suggestion: AddressSuggestion) => {
+    onChange(suggestion.description)
+    setIsOpen(false)
+    setSuggestions([])
+  }
+
+  return (
+    <div className={`relative ${className}`}>
+      <Label htmlFor={id} className="text-sm font-medium text-gray-300 mb-2 block">
+        {label}
+      </Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type="text"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => handleInputChange(e.target.value)}
+          className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 focus:border-orange-400 focus:ring-orange-400/20"
+        />
+
+        {isLoading && (
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+            <div className="animate-spin h-4 w-4 border-2 border-orange-400 border-t-transparent rounded-full"></div>
+          </div>
+        )}
+      </div>
+
+      {isOpen && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-auto">
+          {suggestions.map((suggestion) => (
+            <div
+              key={suggestion.place_id}
+              onClick={() => handleSuggestionClick(suggestion)}
+              className="px-4 py-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0"
+            >
+              <div className="text-white font-medium">{suggestion.structured_formatting.main_text}</div>
+              <div className="text-gray-400 text-sm">{suggestion.structured_formatting.secondary_text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
